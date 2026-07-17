@@ -1,0 +1,36 @@
+# Configuration file for mcp-rules-server
+# MCP Server built with chuk-mcp-runtime
+
+# ── Host Configuration ─────────────────────────────────────────────
+host:
+  name: "mcp-rules-server"
+  log_level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# ── Server Configuration ───────────────────────────────────────────
+server:
+  type: "streamable-http"      # Transport: stdio | sse | streamable-http
+  auth: "none"                # Optional: bearer (JWT) | none
+
+# ── SSE Configuration (Optional) ───────────────────────────────────
+# Uncomment and configure if using SSE transport
+# sse:
+#   host: "0.0.0.0"
+#   port: 8080
+#   sse_path: "/sse"
+#   message_path: "/messages/"
+#   log_level: "info"
+#   access_log: false
+
+# ── Proxy Settings ─────────────────────────────────────────────────
+proxy:
+  enabled: false                 # Turn proxy feature on/off
+  namespace: proxy              # Proxy namespace => proxy.<server>.<tool>
+
+# ── MCP Server Configuration ───────────────────────────────────────
+mcp_servers:
+  rules_server:
+    enabled: true
+    location: "."
+    tools:
+      enabled: true
+      module: "mcp_rules_server.tools.example_tools"

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Car Rental Management System</title>
+    <link rel="stylesheet" href="css/main.css"/>
+</head>
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<nav class="sidebar" id="sidebar">
+    <div class="brand">
+        <span class="brand-icon">🚗</span>
+        <span class="brand-name">FleetRental</span>
+    </div>
+    <ul class="nav-list">
+        <li class="nav-item active" data-page="dashboard">
+            <span class="nav-icon">📊</span> Dashboard
+        </li>
+        <li class="nav-item" data-page="vehicles">
+            <span class="nav-icon">🚙</span> Vehicles
+        </li>
+        <li class="nav-item" data-page="customers">
+            <span class="nav-icon">👤</span> Customers
+        </li>
+        <li class="nav-item" data-page="rentals">
+            <span class="nav-icon">📋</span> Active Rentals
+        </li>
+        <li class="nav-item" data-page="newrental">
+            <span class="nav-icon">➕</span> New Rental
+        </li>
+        <li class="nav-item" data-page="returns">
+            <span class="nav-icon">🔑</span> Return Vehicle
+        </li>
+        <li class="nav-item" data-page="reports">
+            <span class="nav-icon">📈</span> Reports
+        </li>
+        <li class="nav-item" data-page="overdue">
+            <span class="nav-icon">⚠️</span> Overdue
+        </li>
+    </ul>
+    <div class="sidebar-footer">Oracle DB Edition v1.0</div>
+</nav>
+
+<!-- ===== MAIN CONTENT ===== -->
+<main class="main-content" id="mainContent">
+    <!-- Top bar -->
+    <header class="topbar">
+        <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+        <h1 class="page-title" id="pageTitle">Dashboard</h1>
+        <div class="topbar-right">
+            <span class="db-badge">🟢 Oracle Connected</span>
+        </div>
+    </header>
+
+    <!-- Toast notification area -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- ============================
+         PAGE: DASHBOARD
+         ============================ -->
+    <section class="page active" id="page-dashboard">
+        <div class="kpi-grid" id="kpiGrid">
+            <div class="kpi-card">
+                <div class="kpi-label">Active Rentals</div>
+                <div class="kpi-value" id="kpiActive">—</div>
+            </div>
+            <div class="kpi-card kpi-green">
+                <div class="kpi-label">Revenue (30d)</div>
+                <div class="kpi-value" id="kpiRevenue">—</div>
+            </div>
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-label">Total Customers</div>
+                <div class="kpi-value" id="kpiCustomers">—</div>
+            </div>
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-label">Available Vehicles</div>
+                <div class="kpi-value" id="kpiVehicles">—</div>
+            </div>
+        </div>
+
+        <div class="two-col">
+            <div class="card">
+                <h3 class="card-title">Rental Status (30 days)</h3>
+                <table class="data-table" id="dashTable">
+                    <thead>
+                        <tr>
+                            <th>Status</th><th>Count</th>
+                            <th>Total Revenue</th><th>Avg Charge</th><th>Max Charge</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dashBody"></tbody>
+                </table>
+            </div>
+            <div class="card">
+                <h3 class="card-title">Recent Active Rentals</h3>
+                <table class="data-table" id="recentTable">
+                    <thead>
+                        <tr>
+                            <th>#</th><th>Customer</th><th>Vehicle</th>
+                            <th>Picked Up</th><th>Location</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================
+         PAGE: VEHICLES
+         ============================ -->
+    <section class="page" id="page-vehicles">
+        <div class="toolbar">
+            <input type="text" class="search-input" id="vehicleSearch"
+                   placeholder="Search by make, model, plate…" oninput="searchVehicles()"/>
+            <select class="filter-select" id="vehicleCatFilter" onchange="loadVehicles()">
+                <option value="">All Categories</option>
+            </select>
+            <button class="btn btn-primary" onclick="openModal('vehicleModal')">+ Add Vehicle</button>
+        </div>
+        <div class="card">
+            <table class="data-table" id="vehicleTable">
+                <thead>
+                    <tr>
+                        <th>ID</th><th>Vehicle</th><th>Year</th><th>Category</th>
+                        <th>Plate</th><th>Fuel</th><th>Seats</th>
+                        <th>Daily Rate</th><th>Status</th><th>Location</th>
+                    </tr>
+                </thead>
+                <tbody id="vehicleBody"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ============================
+         PAGE: CUSTOMERS
+         ============================ -->
+    <section class="page" id="page-customers">
+        <div class="toolbar">
+            <input type="text" class="search-input" id="customerSearch"
+                   placeholder="Search by name, email, license…" oninput="searchCustomers()"/>
+            <button class="btn btn-primary" onclick="openModal('customerModal')">+ Add Customer</button>
+        </div>
+        <div class="card">
+            <table class="data-table" id="customerTable">
+                <thead>
+                    <tr>
+                        <th>ID</th><th>Name</th><th>Email</th><th>License</th>
+                        <th>Age</th><th>Tier</th><th>Points</th><th>Active</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="customerBody"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ============================
+         PAGE: ACTIVE RENTALS
+         ============================ -->
+    <section class="page" id="page-rentals">
+        <div class="toolbar">
+            <button class="btn btn-secondary" onclick="loadActiveRentals()">🔄 Refresh</button>
+        </div>
+        <div class="card">
+            <table class="data-table" id="rentalTable">
+                <thead>
+                    <tr>
+                        <th>Rental #</th><th>Customer</th><th>Vehicle</th><th>Plate</th>
+                        <th>Pickup Location</th><th>Picked Up</th>
+                        <th>Odometer Out</th><th>Base Charge</th><th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="rentalBody"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ============================
+         PAGE: NEW RENTAL
+         ============================ -->
+    <section class="page" id="page-newrental">
+        <div class="card form-card">
+            <h3 class="card-title">Begin New Rental</h3>
+            <div class="form-grid">
+                <label>Reservation ID *
+                    <input type="number" id="nr_reservationId" placeholder="Reservation ID"/>
+                </label>
+                <label>Employee ID *
+                    <input type="number" id="nr_employeeId" placeholder="Employee ID"/>
+                </label>
+                <label>Odometer Out (miles) *
+                    <input type="number" id="nr_odometerOut" placeholder="Current odometer reading"/>
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary btn-lg" onclick="beginRental()">🚗 Begin Rental</button>
+            </div>
+            <div id="rentalResult" class="result-area hidden"></div>
+        </div>
+    </section>
+
+    <!-- ============================
+         PAGE: RETURN VEHICLE
+         ============================ -->
+    <section class="page" id="page-returns">
+        <div class="card form-card">
+            <h3 class="card-title">Return Vehicle / Complete Rental</h3>
+            <div class="form-grid">
+                <label>Rental ID *
+                    <input type="number" id="ret_rentalId" placeholder="Rental ID to complete"/>
+                </label>
+                <label>Employee ID *
+                    <input type="number" id="ret_employeeId" placeholder="Employee checking in"/>
+                </label>
+                <label>Odometer In (miles) *
+                    <input type="number" id="ret_odometerIn" placeholder="Return odometer reading"/>
+                </label>
+                <label>Fuel Level (%) *
+                    <input type="number" id="ret_fuelLevel" placeholder="0–100" min="0" max="100" value="100"/>
+                </label>
+                <label class="full-span">Damage Notes
+                    <textarea id="ret_damageNotes" rows="3"
+                              placeholder="Describe any damage (leave empty if none)…"></textarea>
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-success btn-lg" onclick="completeRental()">✅ Complete Return</button>
+            </div>
+            <div id="returnResult" class="result-area hidden"></div>
+        </div>
+    </section>
+
+    <!-- ============================
+         PAGE: REPORTS
+         ============================ -->
+    <section class="page" id="page-reports">
+        <div class="toolbar">
+            <label>From: <input type="date" id="reportFrom" /></label>
+            <label>To:   <input type="date" id="reportTo"   /></label>
+            <button class="btn btn-primary" onclick="loadReport()">Run Report</button>
+        </div>
+        <div class="card">
+            <h3 class="card-title">Monthly Revenue Report (Oracle ROLLUP)</h3>
+            <table class="data-table" id="reportTable">
+                <thead>
+                    <tr>
+                        <th>Period</th><th>Rentals</th><th>Total Revenue</th>
+                        <th>Avg Revenue</th><th>Base</th><th>Fuel</th>
+                        <th>Damage</th><th>Late Fees</th>
+                    </tr>
+                </thead>
+                <tbody id="reportBody"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ============================
+         PAGE: OVERDUE
+         ============================ -->
+    <section class="page" id="page-overdue">
+        <div class="toolbar">
+            <button class="btn btn-secondary" onclick="loadOverdue()">🔄 Refresh</button>
+        </div>
+        <div class="card">
+            <h3 class="card-title">Overdue Rentals (Active > 3 Days)</h3>
+            <table class="data-table" id="overdueTable">
+                <thead>
+                    <tr>
+                        <th>Rental #</th><th>Customer</th><th>Vehicle</th>
+                        <th>Pickup Location</th><th>Picked Up</th><th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="overdueBody"></tbody>
+            </table>
+        </div>
+    </section>
+</main>
+
+<!-- ===========================
+     MODAL: ADD VEHICLE
+     =========================== -->
+<div class="modal-backdrop" id="vehicleModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Add New Vehicle</h3>
+            <button class="modal-close" onclick="closeModal('vehicleModal')">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-grid">
+                <label>Make * <input type="text" id="vm_make" placeholder="Toyota"/></label>
+                <label>Model * <input type="text" id="vm_model" placeholder="Corolla"/></label>
+                <label>Year * <input type="number" id="vm_year" placeholder="2024" min="1990" max="2030"/></label>
+                <label>Color <input type="text" id="vm_color" placeholder="Silver"/></label>
+                <label>VIN * <input type="text" id="vm_vin" placeholder="17-char VIN"/></label>
+                <label>License Plate * <input type="text" id="vm_plate" placeholder="ABC-1234"/></label>
+                <label>Category *
+                    <select id="vm_category">
+                        <option value="1">Economy</option>
+                        <option value="2">Compact</option>
+                        <option value="3">SUV</option>
+                        <option value="4">Luxury</option>
+                        <option value="5">Electric</option>
+                        <option value="6">Van</option>
+                    </select>
+                </label>
+                <label>Fuel Type
+                    <select id="vm_fuel">
+                        <option>GASOLINE</option>
+                        <option>DIESEL</option>
+                        <option>HYBRID</option>
+                        <option>ELECTRIC</option>
+                    </select>
+                </label>
+                <label>Transmission
+                    <select id="vm_trans">
+                        <option>AUTOMATIC</option>
+                        <option>MANUAL</option>
+                    </select>
+                </label>
+                <label>Seats <input type="number" id="vm_seats" value="5" min="1" max="15"/></label>
+                <label>Daily Override ($) <input type="number" id="vm_override" placeholder="(optional)"/></label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('vehicleModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveVehicle()">Save Vehicle</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===========================
+     MODAL: ADD CUSTOMER
+     =========================== -->
+<div class="modal-backdrop" id="customerModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Add New Customer</h3>
+            <button class="modal-close" onclick="closeModal('customerModal')">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-grid">
+                <label>First Name * <input type="text" id="cm_first" placeholder="Alice"/></label>
+                <label>Last Name *  <input type="text" id="cm_last"  placeholder="Smith"/></label>
+                <label>Email *      <input type="email" id="cm_email" placeholder="alice@email.com"/></label>
+                <label>License Number * <input type="text" id="cm_license" placeholder="DL-CA-123456"/></label>
+                <label>License Expiry * <input type="date" id="cm_licexpiry"/></label>
+                <label>Date of Birth *  <input type="date" id="cm_dob"/></label>
+                <label class="full-span">Notes
+                    <textarea id="cm_notes" rows="2" placeholder="Any notes…"></textarea>
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('customerModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveCustomer()">Save Customer</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===========================
+     MODAL: CUSTOMER HISTORY
+     =========================== -->
+<div class="modal-backdrop" id="historyModal">
+    <div class="modal modal-wide">
+        <div class="modal-header">
+            <h3>Rental History — <span id="historyCustomerName"></span></h3>
+            <button class="modal-close" onclick="closeModal('historyModal')">✕</button>
+        </div>
+        <div class="modal-body">
+            <table class="data-table" id="historyTable">
+                <thead>
+                    <tr>
+                        <th>#</th><th>Vehicle</th><th>Plate</th>
+                        <th>Pickup</th><th>Return</th><th>Charge</th>
+                        <th>Running Total</th><th>Rank</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody"></tbody>
+            </table>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('historyModal')">Close</button>
+        </div>
+    </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

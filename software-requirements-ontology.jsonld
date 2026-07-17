@@ -1,0 +1,193 @@
+{
+  "@context": {
+    "@vocab":          "https://schema.example.org/sro#",
+    "schema":          "https://schema.org/",
+    "xsd":             "https://www.w3.org/2001/XMLSchema#",
+    "dcterms":         "https://purl.org/dc/terms/",
+
+    "SoftwareProject":          "schema:SoftwareApplication",
+    "FunctionalRequirement":    "https://schema.example.org/sro#FunctionalRequirement",
+    "NonFunctionalRequirement": "https://schema.example.org/sro#NonFunctionalRequirement",
+    "ConstraintRequirement":    "https://schema.example.org/sro#ConstraintRequirement",
+    "TechnicalRequirement":     "https://schema.example.org/sro#TechnicalRequirement",
+
+    "requirementId":   "dcterms:identifier",
+    "title":           "dcterms:title",
+    "description":     "dcterms:description",
+    "priority":        "https://schema.example.org/sro#priority",
+    "status":          "https://schema.example.org/sro#status",
+    "relatedEntity":   "https://schema.example.org/sro#relatedEntity",
+    "sqlOperation":    "https://schema.example.org/sro#sqlOperation",
+    "technology":      "https://schema.example.org/sro#technology",
+    "qualityAttribute":"https://schema.example.org/sro#qualityAttribute",
+    "hasRequirement":  "https://schema.example.org/sro#hasRequirement",
+    "dependsOn":       "https://schema.example.org/sro#dependsOn",
+    "inputFields":     "https://schema.example.org/sro#inputFields",
+    "nullable":        "https://schema.example.org/sro#nullable"
+  },
+
+  "@type": "SoftwareProject",
+  "@id":   "https://schema.example.org/projects/employee-crud-app",
+  "title": "Employee CRUD — Standalone Java + MySQL Application",
+  "description": "A standalone Java application that connects to a pre-existing MySQL database and performs Create, Read, Update, and Delete operations on the Employee table.",
+  "schema:programmingLanguage": "Java",
+  "schema:runtimePlatform":     "Java SE 11+",
+
+  "hasRequirement": [
+
+    {
+      "@type":         "ConstraintRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-001",
+      "requirementId": "REQ-001",
+      "title":         "Standalone Java Application",
+      "description":   "The system shall be implemented as a standalone Java application with a main entry point (no web container required).",
+      "priority":      "Must-Have",
+      "status":        "Approved",
+      "technology":    ["Java SE", "JVM"]
+    },
+
+    {
+      "@type":         "ConstraintRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-002",
+      "requirementId": "REQ-002",
+      "title":         "MySQL Database Backend",
+      "description":   "The application shall connect exclusively to a MySQL relational database. The Employee table is pre-existing and must not be re-created by the application.",
+      "priority":      "Must-Have",
+      "status":        "Approved",
+      "technology":    ["MySQL"],
+      "relatedEntity": "Employee"
+    },
+
+    {
+      "@type":         "TechnicalRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-003",
+      "requirementId": "REQ-003",
+      "title":         "JDBC Connectivity",
+      "description":   "The application shall use the MySQL JDBC driver (Connector/J) to establish and manage database connections.",
+      "priority":      "Must-Have",
+      "status":        "Approved",
+      "technology":    ["JDBC", "MySQL Connector/J"],
+      "dependsOn":     ["REQ-001", "REQ-002"]
+    },
+
+    {
+      "@type":         "TechnicalRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-011",
+      "requirementId": "REQ-011",
+      "title":         "Java Version",
+      "description":   "The application shall be compiled and executed on Java SE 11 or higher.",
+      "priority":      "Must-Have",
+      "status":        "Approved",
+      "technology":    ["Java SE 11"]
+    },
+
+    {
+      "@type":         "FunctionalRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-004",
+      "requirementId": "REQ-004",
+      "title":         "Create Employee Record",
+      "description":   "The system shall accept employee attributes (name, department, salary, hireDate) and persist a new row in the Employee table via an SQL INSERT statement.",
+      "priority":      "Must-Have",
+      "status":        "Approved",
+      "sqlOperation":  "INSERT",
+      "relatedEntity": "Employee",
+      "dependsOn":     ["REQ-003"],
+      "inputFields": [
+        { "name": "employeeId",  "type": "xsd:integer", "nullable": false },
+        { "name": "firstName",   "type": "xsd:string",  "nullable": false },
+        { "name": "lastName",    "type": "xsd:string",  "nullable": false },
+        { "name": "department",  "type": "xsd:string",  "nullable": true  },
+        { "name": "salary",      "type": "xsd:decimal", "nullable": true  },
+        { "name": "hireDate",    "type": "xsd:date",    "nullable": true  }
+      ]
+    },
+
+    {
+      "@type":         "FunctionalRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-005",
+      "requirementId": "REQ-005",
+      "title":         "Read / Retrieve Employee Record",
+      "description":   "The system shall query and display employee records by employeeId or return all employees via an SQL SELECT statement.",
+      "priority":      "Must-Have",
+      "status":        "Approved",
+      "sqlOperation":  "SELECT",
+      "relatedEntity": "Employee",
+      "dependsOn":     ["REQ-003"]
+    },
+
+    {
+      "@type":         "FunctionalRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-006",
+      "requirementId": "REQ-006",
+      "title":         "Update Employee Record",
+      "description":   "The system shall modify one or more attributes of an existing employee record identified by employeeId via an SQL UPDATE statement.",
+      "priority":      "Must-Have",
+      "status":        "Approved",
+      "sqlOperation":  "UPDATE",
+      "relatedEntity": "Employee",
+      "dependsOn":     ["REQ-003", "REQ-005"]
+    },
+
+    {
+      "@type":         "FunctionalRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-007",
+      "requirementId": "REQ-007",
+      "title":         "Delete Employee Record",
+      "description":   "The system shall permanently remove an employee record identified by employeeId from the Employee table via an SQL DELETE statement.",
+      "priority":      "Must-Have",
+      "status":        "Approved",
+      "sqlOperation":  "DELETE",
+      "relatedEntity": "Employee",
+      "dependsOn":     ["REQ-003", "REQ-005"]
+    },
+
+    {
+      "@type":         "NonFunctionalRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-008",
+      "requirementId": "REQ-008",
+      "title":         "Connection Security — Externalised Credentials",
+      "description":   "Database credentials (host, port, username, password) shall not be hard-coded; they shall be externalised in a .properties file or environment variables.",
+      "priority":      "Should-Have",
+      "status":        "Approved",
+      "qualityAttribute": "Security",
+      "dependsOn":     ["REQ-003"]
+    },
+
+    {
+      "@type":         "NonFunctionalRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-009",
+      "requirementId": "REQ-009",
+      "title":         "SQL Injection Prevention",
+      "description":   "All SQL statements that accept user-supplied input shall use PreparedStatement to prevent SQL injection attacks.",
+      "priority":      "Must-Have",
+      "status":        "Approved",
+      "qualityAttribute": "Security",
+      "dependsOn":     ["REQ-004", "REQ-005", "REQ-006", "REQ-007"]
+    },
+
+    {
+      "@type":         "NonFunctionalRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-010",
+      "requirementId": "REQ-010",
+      "title":         "JDBC Resource Management",
+      "description":   "All JDBC resources (Connection, Statement, ResultSet) shall be closed via try-with-resources after each operation to prevent connection leaks.",
+      "priority":      "Must-Have",
+      "status":        "Approved",
+      "qualityAttribute": "Reliability",
+      "dependsOn":     ["REQ-003"]
+    },
+
+    {
+      "@type":         "NonFunctionalRequirement",
+      "@id":           "https://schema.example.org/projects/employee-crud-app/REQ-012",
+      "requirementId": "REQ-012",
+      "title":         "Error Handling and Logging",
+      "description":   "All SQLExceptions and connectivity failures shall be caught and logged with a meaningful message. Silent data corruption is not permitted.",
+      "priority":      "Should-Have",
+      "status":        "Approved",
+      "qualityAttribute": "Maintainability",
+      "dependsOn":     ["REQ-003"]
+    }
+
+  ]
+}
