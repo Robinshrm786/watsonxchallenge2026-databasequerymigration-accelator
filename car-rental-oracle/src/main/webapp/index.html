@@ -5,8 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Car Rental Management System</title>
     <link rel="stylesheet" href="css/main.css"/>
+    <style>
+        .demo-banner{background:#1a2035;color:#7dd3fc;font-size:12px;padding:6px 16px;
+            text-align:center;letter-spacing:.3px;border-bottom:2px solid #3b82d4}
+        .demo-banner strong{color:#fff}
+        .demo-banner a{color:#7dd3fc;text-decoration:underline}
+    </style>
 </head>
 <body>
+
+<!-- DEMO MODE BANNER -->
+<div class="demo-banner">
+    🧪 <strong>Demo Mode</strong> — running with mock data, no backend needed.
+    Remove <code>mock-api.js</code> to connect to the real Oracle database.
+</div>
 
 <!-- ===== SIDEBAR ===== -->
 <nav class="sidebar" id="sidebar">
@@ -386,6 +398,8 @@
     </div>
 </div>
 
+<!-- Load mock API BEFORE app.js so fetch() is already intercepted on load -->
+<script src="js/mock-api.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
