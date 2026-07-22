@@ -6,14 +6,13 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.carrental</groupId>
-    <artifactId>car-rental-oracle</artifactId>
+    <artifactId>car-rental-postgresql</artifactId>
     <version>1.0.0</version>
     <packaging>war</packaging>
-    <name>Car Rental Oracle System</name>
+    <name>Car Rental PostgreSQL System</name>
     <description>
-        Car Rental Management System using Oracle Database.
-        Designed to demonstrate Oracle-specific SQL patterns
-        for migration to PostgreSQL.
+        Car Rental Management System using PostgreSQL Database.
+        Migrated from Oracle — demonstrates PostgreSQL-compatible SQL patterns.
     </description>
 
     <properties>
@@ -31,21 +30,11 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- Oracle JDBC Driver (ojdbc11 for JDK 17+) -->
-        <!-- Download from https://www.oracle.com/database/technologies/appdev/jdbc-downloads.html -->
-        <!-- Or add to local Maven repo: mvn install:install-file -Dfile=ojdbc11.jar
-             -DgroupId=com.oracle.database.jdbc -DartifactId=ojdbc11 -Dversion=23.3.0 -Dpackaging=jar -->
+        <!-- PostgreSQL JDBC Driver -->
         <dependency>
-            <groupId>com.oracle.database.jdbc</groupId>
-            <artifactId>ojdbc11</artifactId>
-            <version>23.3.0.23.09</version>
-        </dependency>
-
-        <!-- Oracle Connection Pooling (UCP) — optional but recommended for production -->
-        <dependency>
-            <groupId>com.oracle.database.jdbc</groupId>
-            <artifactId>ucp</artifactId>
-            <version>23.3.0.23.09</version>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.3</version>
         </dependency>
 
         <!-- Logging -->
@@ -84,12 +73,4 @@
             </plugin>
         </plugins>
     </build>
-
-    <!-- Oracle Maven Repository (requires Oracle account) -->
-    <repositories>
-        <repository>
-            <id>oracle-maven</id>
-            <url>https://maven.oracle.com</url>
-        </repository>
-    </repositories>
 </project>

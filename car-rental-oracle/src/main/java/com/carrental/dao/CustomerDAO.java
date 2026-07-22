@@ -12,36 +12,36 @@ import java.util.Optional;
 import java.util.logging.Logger;
 
 /**
- * DAO for CUSTOMERS table.
+ * DAO for CUSTOMERS table — migrated from Oracle to PostgreSQL.
  *
- * Oracle patterns demonstrated:
- *  - Sequence.NEXTVAL in INSERT VALUES
- *  - Virtual columns (full_name, age) read from result set
- *  - RETURNING INTO via CallableStatement
- *  - Named bind variables with Oracle JDBC
- *  - Calling package procedure via CallableStatement with IN/OUT params
+ * Key changes from Oracle:
+ *  - TRUNC(MONTHS_BETWEEN(SYSDATE,dob)/12) → EXTRACT(YEAR FROM AGE(NOW(),dob))::INTEGER
+ *  - Named bind :activeOnly → positional ? bind
+ *  - seq_customer_id.NEXTVAL → NEXTVAL('seq_customer_id')
+ *  - CLOB / conn.createClob() → plain VARCHAR / ps.setString()
+ *  - SYSTIMESTAMP → NOW()
+ *  - PreparedStatement(sql, new String[]{"customer_id"}) key-hint → standard RETURN_GENERATED_KEYS
  */
 public class CustomerDAO {
 
     private static final Logger LOG = Logger.getLogger(CustomerDAO.class.getName());
 
     // -----------------------------------------------------------------------
-    // FIND ALL — with Oracle NVL, CASE for tier labelling
+    // FIND ALL
     // -----------------------------------------------------------------------
     public List<Customer> findAll(boolean activeOnly) throws SQLException {
         final String sql = """
             SELECT customer_id, first_name, last_name,
                    first_name || ' ' || last_name  AS full_name,
                    email, license_number, license_expiry, date_of_birth,
-                   TRUNC(MONTHS_BETWEEN(SYSDATE, date_of_birth)/12) AS age,
+                   EXTRACT(YEAR FROM AGE(NOW(), date_of_birth))::INTEGER AS age,
                    loyalty_points, tier, notes, is_active,
                    created_at, updated_at
               FROM customers
-             WHERE (:activeOnly = 0 OR is_active = 'Y')
+             WHERE (? = 0 OR is_active = 'Y')
              ORDER BY last_name, first_name
             """;
         Connection conn = DBConnectionPool.getInstance().getConnection();
-        // Oracle named parameters via PreparedStatement index
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, activeOnly ? 1 : 0);
             return mapResultSet(ps.executeQuery());
@@ -58,7 +58,7 @@ public class CustomerDAO {
             SELECT customer_id, first_name, last_name,
                    first_name || ' ' || last_name AS full_name,
                    email, license_number, license_expiry, date_of_birth,
-                   TRUNC(MONTHS_BETWEEN(SYSDATE, date_of_birth)/12) AS age,
+                   EXTRACT(YEAR FROM AGE(NOW(), date_of_birth))::INTEGER AS age,
                    loyalty_points, tier, notes, is_active,
                    created_at, updated_at
               FROM customers
@@ -82,7 +82,7 @@ public class CustomerDAO {
             SELECT customer_id, first_name, last_name,
                    first_name || ' ' || last_name AS full_name,
                    email, license_number, license_expiry, date_of_birth,
-                   TRUNC(MONTHS_BETWEEN(SYSDATE, date_of_birth)/12) AS age,
+                   EXTRACT(YEAR FROM AGE(NOW(), date_of_birth))::INTEGER AS age,
                    loyalty_points, tier, notes, is_active,
                    created_at, updated_at
               FROM customers
@@ -105,27 +105,24 @@ public class CustomerDAO {
     }
 
     // -----------------------------------------------------------------------
-    // INSERT — Oracle sequence.NEXTVAL, trigger handles updated_at
+    // INSERT — PostgreSQL NEXTVAL sequence, TEXT instead of CLOB
     // -----------------------------------------------------------------------
     public long insert(Customer c) throws SQLException {
-        // Note: trigger trg_customers_bi sets tier and updated_at automatically
         final String sql = """
             INSERT INTO customers (
                 customer_id, first_name, last_name, email,
                 license_number, license_expiry, date_of_birth,
                 loyalty_points, notes, is_active
             ) VALUES (
-                seq_customer_id.NEXTVAL, ?, ?, ?,
+                NEXTVAL('seq_customer_id'), ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, 'Y'
             )
             """;
 
         Connection conn = DBConnectionPool.getInstance().getConnection();
-        // Use PreparedStatement with getGeneratedKeys (requires returning clause)
-        // Oracle JDBC: use KEY_COLUMN_NAMES for generated key retrieval
         try (PreparedStatement ps = conn.prepareStatement(sql,
-                new String[]{"customer_id"})) {
+                Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, c.getFirstName());
             ps.setString(2, c.getLastName());
             ps.setString(3, c.getEmail());
@@ -134,12 +131,9 @@ public class CustomerDAO {
             ps.setDate(6,   Date.valueOf(c.getDateOfBirth()));
             ps.setInt(7,    c.getLoyaltyPoints() != null ? c.getLoyaltyPoints() : 0);
             if (c.getNotes() != null) {
-                // Oracle CLOB handling
-                Clob clob = conn.createClob();
-                clob.setString(1, c.getNotes());
-                ps.setClob(8, clob);
+                ps.setString(8, c.getNotes());
             } else {
-                ps.setNull(8, Types.CLOB);
+                ps.setNull(8, Types.VARCHAR);
             }
             ps.executeUpdate();
             try (ResultSet generatedKeys = ps.getGeneratedKeys()) {
@@ -161,7 +155,7 @@ public class CustomerDAO {
     }
 
     // -----------------------------------------------------------------------
-    // UPDATE — uses SYSTIMESTAMP (trigger also fires bu)
+    // UPDATE — NOW() instead of SYSTIMESTAMP, TEXT instead of CLOB
     // -----------------------------------------------------------------------
     public void update(Customer c) throws SQLException {
         final String sql = """
@@ -174,7 +168,7 @@ public class CustomerDAO {
                    date_of_birth  = ?,
                    notes          = ?,
                    loyalty_points = ?,
-                   updated_at     = SYSTIMESTAMP
+                   updated_at     = NOW()
              WHERE customer_id = ?
             """;
         Connection conn = DBConnectionPool.getInstance().getConnection();
@@ -186,11 +180,9 @@ public class CustomerDAO {
             ps.setDate(5,   Date.valueOf(c.getLicenseExpiry()));
             ps.setDate(6,   Date.valueOf(c.getDateOfBirth()));
             if (c.getNotes() != null) {
-                Clob clob = conn.createClob();
-                clob.setString(1, c.getNotes());
-                ps.setClob(7, clob);
+                ps.setString(7, c.getNotes());
             } else {
-                ps.setNull(7, Types.CLOB);
+                ps.setNull(7, Types.VARCHAR);
             }
             ps.setInt(8,  c.getLoyaltyPoints() != null ? c.getLoyaltyPoints() : 0);
             ps.setLong(9, c.getCustomerId());
@@ -206,10 +198,10 @@ public class CustomerDAO {
     }
 
     // -----------------------------------------------------------------------
-    // Soft-delete (set is_active = 'N')
+    // Soft-delete (set is_active = 'N') — NOW() instead of SYSTIMESTAMP
     // -----------------------------------------------------------------------
     public void softDelete(long customerId) throws SQLException {
-        final String sql = "UPDATE customers SET is_active='N', updated_at=SYSTIMESTAMP WHERE customer_id=?";
+        final String sql = "UPDATE customers SET is_active='N', updated_at=NOW() WHERE customer_id=?";
         Connection conn = DBConnectionPool.getInstance().getConnection();
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, customerId);
@@ -224,7 +216,7 @@ public class CustomerDAO {
     }
 
     // -----------------------------------------------------------------------
-    // Rental history with window functions — called from report
+    // Rental history with window functions — unchanged (ANSI SQL)
     // -----------------------------------------------------------------------
     public List<Object[]> getRentalHistory(long customerId) throws SQLException {
         final String sql = """

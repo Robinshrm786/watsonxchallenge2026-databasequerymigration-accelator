@@ -9,10 +9,9 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Thread-safe Oracle JDBC connection pool (manual pooling with bounded queue).
- * Uses Oracle Thin JDBC driver (ojdbc11.jar).
- * Pattern note: Oracle uses jdbc:oracle:thin:@ prefix
- *               PostgreSQL migration would use jdbc:postgresql://
+ * Thread-safe PostgreSQL JDBC connection pool (manual pooling with bounded queue).
+ * Uses PostgreSQL JDBC driver (postgresql-42.x.jar).
+ * Pattern note: PostgreSQL uses jdbc:postgresql:// prefix
  */
 public class DBConnectionPool {
 
@@ -28,7 +27,7 @@ public class DBConnectionPool {
 
     private DBConnectionPool() {
         Properties props = loadProps();
-        this.jdbcUrl  = props.getProperty("db.url",      "jdbc:oracle:thin:@localhost:1521:XEPDB1");
+        this.jdbcUrl  = props.getProperty("db.url",      "jdbc:postgresql://localhost:5432/car_rental");
         this.username = props.getProperty("db.user",     "car_rental");
         this.password = props.getProperty("db.password", "car_rental_pass");
         this.poolSize = Integer.parseInt(props.getProperty("db.pool.size", "10"));
@@ -36,14 +35,14 @@ public class DBConnectionPool {
         pool = new java.util.concurrent.ArrayBlockingQueue<>(poolSize);
 
         try {
-            // Oracle JDBC driver registration
-            Class.forName("oracle.jdbc.OracleDriver");
+            // PostgreSQL JDBC driver registration
+            Class.forName("org.postgresql.Driver");
             for (int i = 0; i < poolSize; i++) {
                 pool.offer(createConnection());
             }
             LOG.info("DBConnectionPool initialized: " + poolSize + " connections to " + jdbcUrl);
         } catch (ClassNotFoundException e) {
-            throw new RuntimeException("Oracle JDBC driver not found. Add ojdbc11.jar to classpath.", e);
+            throw new RuntimeException("PostgreSQL JDBC driver not found. Add postgresql.jar to classpath.", e);
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize connection pool", e);
         }
@@ -53,10 +52,10 @@ public class DBConnectionPool {
         Properties connProps = new Properties();
         connProps.setProperty("user",     username);
         connProps.setProperty("password", password);
-        // Oracle-specific: enable statement caching (reduces parse overhead)
-        connProps.setProperty("oracle.jdbc.implicitStatementCacheSize", "20");
-        // Oracle-specific: set client info for auditing (SYS_CONTEXT)
-        connProps.setProperty("v$session.program", "CarRentalApp");
+        // PostgreSQL: enable batched inserts rewriting for better performance
+        connProps.setProperty("reWriteBatchedInserts", "true");
+        // PostgreSQL: set application name visible in pg_stat_activity
+        connProps.setProperty("ApplicationName", "CarRentalApp");
         return DriverManager.getConnection(jdbcUrl, connProps);
     }
 

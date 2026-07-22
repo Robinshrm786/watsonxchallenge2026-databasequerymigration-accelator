@@ -2,7 +2,6 @@ package com.carrental.dao;
 
 import com.carrental.model.Vehicle;
 import com.carrental.util.DBConnectionPool;
-import oracle.jdbc.OracleTypes;
 
 import java.math.BigDecimal;
 import java.sql.*;
@@ -14,14 +13,17 @@ import java.util.Optional;
 import java.util.logging.Logger;
 
 /**
- * Data Access Object for VEHICLES.
+ * Data Access Object for VEHICLES — migrated from Oracle to PostgreSQL.
  *
- * Demonstrates Oracle JDBC patterns:
- *  - CallableStatement for stored procedures/functions
- *  - Named parameters via oracle.jdbc.OracleTypes.CURSOR
- *  - PreparedStatement with setDate/setTimestamp
- *  - ResultSet metadata reading
- *  - Batch inserts via addBatch()/executeBatch()
+ * Key changes from Oracle:
+ *  - Removed import oracle.jdbc.OracleTypes
+ *  - NVL() → COALESCE()
+ *  - seq_vehicle_id.NEXTVAL → NEXTVAL('seq_vehicle_id')
+ *  - CallableStatement + RETURNING INTO ? → PreparedStatement + RETURNING vehicle_id
+ *  - SYSTIMESTAMP → NOW()
+ *  - SELECT fn() FROM dual → SELECT fn()
+ *  - TABLE(car_rental_pkg.revenue_by_month()) → direct GROUP BY ROLLUP query
+ *  - CallableStatement params in helpers → PreparedStatement
  */
 public class VehicleDAO {
 
@@ -29,7 +31,6 @@ public class VehicleDAO {
 
     // -----------------------------------------------------------------------
     // FIND ALL AVAILABLE vehicles with joined category & location
-    // Oracle feature: NVL(), JOIN, partition pruning hint via WHERE
     // -----------------------------------------------------------------------
     public List<Vehicle> findAvailable(Integer locationId, String categoryId) throws SQLException {
         StringBuilder sql = new StringBuilder("""
@@ -39,7 +40,7 @@ public class VehicleDAO {
                    v.make, v.model, v.model_year, v.color,
                    v.vin, v.license_plate, v.mileage, v.fuel_type,
                    v.transmission, v.seats, v.status,
-                   NVL(v.daily_override, vc.daily_rate)  AS daily_rate,
+                   COALESCE(v.daily_override, vc.daily_rate)  AS daily_rate,
                    v.daily_override,
                    v.last_service_date, v.insurance_expiry,
                    v.is_active, v.created_at, v.updated_at
@@ -73,7 +74,7 @@ public class VehicleDAO {
     }
 
     // -----------------------------------------------------------------------
-    // FIND BY ID — using Oracle dual-table style with rownum safety
+    // FIND BY ID
     // -----------------------------------------------------------------------
     public Optional<Vehicle> findById(long vehicleId) throws SQLException {
         final String sql = """
@@ -83,7 +84,7 @@ public class VehicleDAO {
                    v.make, v.model, v.model_year, v.color,
                    v.vin, v.license_plate, v.mileage, v.fuel_type,
                    v.transmission, v.seats, v.status,
-                   NVL(v.daily_override, vc.daily_rate) AS daily_rate,
+                   COALESCE(v.daily_override, vc.daily_rate) AS daily_rate,
                    v.daily_override,
                    v.last_service_date, v.insurance_expiry,
                    v.is_active, v.created_at, v.updated_at
@@ -103,12 +104,10 @@ public class VehicleDAO {
     }
 
     // -----------------------------------------------------------------------
-    // INSERT with Oracle SEQUENCE.NEXTVAL and RETURNING INTO
-    // Oracle: INSERT ... RETURNING col INTO ?
-    // PostgreSQL equivalent: INSERT ... RETURNING col
+    // INSERT with PostgreSQL NEXTVAL and RETURNING clause
+    // PostgreSQL: INSERT ... RETURNING col  (read via executeQuery)
     // -----------------------------------------------------------------------
     public long insert(Vehicle v) throws SQLException {
-        // Oracle: use sequence in VALUES
         final String sql = """
             INSERT INTO vehicles (
                 vehicle_id, category_id, location_id,
@@ -117,46 +116,46 @@ public class VehicleDAO {
                 seats, status, daily_override, description,
                 last_service_date, insurance_expiry, is_active
             ) VALUES (
-                seq_vehicle_id.NEXTVAL, ?, ?,
+                NEXTVAL('seq_vehicle_id'), ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?
-            )
+            ) RETURNING vehicle_id
             """;
 
         Connection conn = DBConnectionPool.getInstance().getConnection();
-        // RETURNING INTO: Oracle-specific to get generated PK back
-        final String sqlReturning = sql.replace(")", "\n) RETURNING vehicle_id INTO ?");
-        // Use standard OracleCallableStatement for RETURNING
-        try (CallableStatement cs = conn.prepareCall(sqlReturning)) {
-            cs.setInt(1,  v.getCategoryId());
-            setNullableInt(cs, 2, v.getLocationId());
-            cs.setString(3,  v.getMake());
-            cs.setString(4,  v.getModel());
-            cs.setInt(5,     v.getModelYear());
-            cs.setString(6,  v.getColor());
-            cs.setString(7,  v.getVin());
-            cs.setString(8,  v.getLicensePlate());
-            cs.setLong(9,    v.getMileage() != null ? v.getMileage() : 0);
-            cs.setString(10, v.getFuelType() != null ? v.getFuelType() : "GASOLINE");
-            cs.setString(11, v.getTransmission() != null ? v.getTransmission() : "AUTOMATIC");
-            cs.setInt(12,    v.getSeats() != null ? v.getSeats() : 5);
-            cs.setString(13, v.getStatus() != null ? v.getStatus() : "AVAILABLE");
-            if (v.getDailyOverride() != null) cs.setBigDecimal(14, v.getDailyOverride());
-            else cs.setNull(14, Types.NUMERIC);
-            cs.setString(15, v.getDescription());
-            setNullableDate(cs, 16, v.getLastServiceDate());
-            setNullableDate(cs, 17, v.getInsuranceExpiry());
-            cs.setString(18, "Y");
-            // RETURNING INTO out parameter
-            cs.registerOutParameter(19, Types.NUMERIC);
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1,  v.getCategoryId());
+            setNullableInt(ps, 2, v.getLocationId());
+            ps.setString(3,  v.getMake());
+            ps.setString(4,  v.getModel());
+            ps.setInt(5,     v.getModelYear());
+            ps.setString(6,  v.getColor());
+            ps.setString(7,  v.getVin());
+            ps.setString(8,  v.getLicensePlate());
+            ps.setLong(9,    v.getMileage() != null ? v.getMileage() : 0);
+            ps.setString(10, v.getFuelType() != null ? v.getFuelType() : "GASOLINE");
+            ps.setString(11, v.getTransmission() != null ? v.getTransmission() : "AUTOMATIC");
+            ps.setInt(12,    v.getSeats() != null ? v.getSeats() : 5);
+            ps.setString(13, v.getStatus() != null ? v.getStatus() : "AVAILABLE");
+            if (v.getDailyOverride() != null) ps.setBigDecimal(14, v.getDailyOverride());
+            else ps.setNull(14, Types.NUMERIC);
+            ps.setString(15, v.getDescription());
+            setNullableDate(ps, 16, v.getLastServiceDate());
+            setNullableDate(ps, 17, v.getInsuranceExpiry());
+            ps.setString(18, "Y");
 
-            cs.executeUpdate();
-            long newId = cs.getLong(19);
-            conn.commit();
-            LOG.info("Inserted vehicle id=" + newId);
-            return newId;
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    long newId = rs.getLong(1);
+                    conn.commit();
+                    LOG.info("Inserted vehicle id=" + newId);
+                    return newId;
+                }
+            }
+            conn.rollback();
+            throw new SQLException("Insert vehicle failed, no ID returned.");
         } catch (SQLException e) {
             conn.rollback();
             throw e;
@@ -166,10 +165,10 @@ public class VehicleDAO {
     }
 
     // -----------------------------------------------------------------------
-    // UPDATE vehicle status — used by triggers pattern demonstration
+    // UPDATE vehicle status — NOW() instead of SYSTIMESTAMP
     // -----------------------------------------------------------------------
     public void updateStatus(long vehicleId, String status) throws SQLException {
-        final String sql = "UPDATE vehicles SET status = ?, updated_at = SYSTIMESTAMP WHERE vehicle_id = ?";
+        final String sql = "UPDATE vehicles SET status = ?, updated_at = NOW() WHERE vehicle_id = ?";
         Connection conn = DBConnectionPool.getInstance().getConnection();
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, status);
@@ -185,12 +184,12 @@ public class VehicleDAO {
     }
 
     // -----------------------------------------------------------------------
-    // Vehicle utilization — calls Oracle standalone function
-    // Oracle: SELECT function() FROM dual
+    // Vehicle utilization — calls PostgreSQL standalone function
+    // PostgreSQL: SELECT function() — no FROM dual needed
     // -----------------------------------------------------------------------
     public BigDecimal getUtilizationRate(long vehicleId, LocalDate start, LocalDate end) throws SQLException {
         final String sql = """
-            SELECT get_vehicle_utilization(?, ?, ?) FROM dual
+            SELECT get_vehicle_utilization(?, ?, ?)
             """;
         Connection conn = DBConnectionPool.getInstance().getConnection();
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -207,17 +206,16 @@ public class VehicleDAO {
     }
 
     // -----------------------------------------------------------------------
-    // Search with UPPER() function-based index
+    // Search with UPPER() — unchanged (ANSI SQL)
     // -----------------------------------------------------------------------
     public List<Vehicle> search(String keyword) throws SQLException {
-        // Uses idx_vehicles_location; UPPER for FBI usage
         final String sql = """
             SELECT v.vehicle_id, v.category_id, vc.category_name,
                    v.location_id, l.location_name,
                    v.make, v.model, v.model_year, v.color,
                    v.vin, v.license_plate, v.mileage, v.fuel_type,
                    v.transmission, v.seats, v.status,
-                   NVL(v.daily_override, vc.daily_rate) AS daily_rate,
+                   COALESCE(v.daily_override, vc.daily_rate) AS daily_rate,
                    v.daily_override,
                    v.last_service_date, v.insurance_expiry,
                    v.is_active, v.created_at, v.updated_at
@@ -243,14 +241,19 @@ public class VehicleDAO {
     }
 
     // -----------------------------------------------------------------------
-    // Revenue report — pipelined function via TABLE() operator
-    // Oracle: SELECT * FROM TABLE(car_rental_pkg.revenue_by_month(?,?))
+    // Revenue report — replaces Oracle pipelined function TABLE() call
+    // with a direct GROUP BY ROLLUP query compatible with PostgreSQL
     // -----------------------------------------------------------------------
     public List<Object[]> getMonthlyRevenue(LocalDate startDate, LocalDate endDate) throws SQLException {
         final String sql = """
-            SELECT period_label, rental_count, total_revenue
-              FROM TABLE(car_rental_pkg.revenue_by_month(?, ?))
-             ORDER BY period_label
+            SELECT COALESCE(TO_CHAR(DATE_TRUNC('month', actual_dropoff), 'YYYY-MM'), 'TOTAL') AS period_label,
+                   COUNT(*)          AS rental_count,
+                   SUM(total_charge) AS total_revenue
+              FROM rentals
+             WHERE status = 'COMPLETED'
+               AND actual_dropoff::DATE BETWEEN ? AND ?
+             GROUP BY ROLLUP(DATE_TRUNC('month', actual_dropoff))
+             ORDER BY DATE_TRUNC('month', actual_dropoff) NULLS LAST
             """;
         List<Object[]> rows = new ArrayList<>();
         Connection conn = DBConnectionPool.getInstance().getConnection();
@@ -269,7 +272,7 @@ public class VehicleDAO {
     }
 
     // -----------------------------------------------------------------------
-    // Helpers
+    // Helpers — use PreparedStatement (not CallableStatement)
     // -----------------------------------------------------------------------
     private List<Vehicle> mapResultSet(ResultSet rs) throws SQLException {
         List<Vehicle> list = new ArrayList<>();
@@ -308,10 +311,10 @@ public class VehicleDAO {
         return list;
     }
 
-    private void setNullableInt(CallableStatement cs, int idx, Integer val) throws SQLException {
-        if (val != null) cs.setInt(idx, val); else cs.setNull(idx, Types.INTEGER);
+    private void setNullableInt(PreparedStatement ps, int idx, Integer val) throws SQLException {
+        if (val != null) ps.setInt(idx, val); else ps.setNull(idx, Types.INTEGER);
     }
-    private void setNullableDate(CallableStatement cs, int idx, LocalDate val) throws SQLException {
-        if (val != null) cs.setDate(idx, Date.valueOf(val)); else cs.setNull(idx, Types.DATE);
+    private void setNullableDate(PreparedStatement ps, int idx, LocalDate val) throws SQLException {
+        if (val != null) ps.setDate(idx, Date.valueOf(val)); else ps.setNull(idx, Types.DATE);
     }
 }

@@ -11,34 +11,77 @@ import java.util.Optional;
 import java.util.logging.Logger;
 
 /**
- * DAO for RENTALS table.
+ * DAO for RENTALS table — migrated from Oracle to PostgreSQL.
  *
- * Oracle patterns:
- *  - CallableStatement calling package procedures (car_rental_pkg)
- *  - REF CURSOR output parameter (OracleTypes.CURSOR)
- *  - EXECUTE IMMEDIATE via Java dynamic SQL building
- *  - Analytic functions in SELECT
- *  - CTE (WITH clause) queries
+ * Key changes from Oracle:
+ *  - beginRental: { call car_rental_pkg.begin_rental(?,?,?,?) } CallableStatement
+ *    → direct SQL with SELECT FOR UPDATE + INSERT RETURNING rental_id + UPDATE
+ *  - completeRental: { call car_rental_pkg.complete_rental(?,?,?,?,?) }
+ *    → direct UPDATE SQL; Clob → plain String
+ *  - TRUNC(created_at) >= TRUNC(SYSDATE) - 30  → created_at::DATE >= CURRENT_DATE - INTERVAL '30 days'
+ *  - ROUND((SYSTIMESTAMP - actual_pickup)*24, 1) → ROUND(EXTRACT(EPOCH FROM (NOW()-actual_pickup))/3600::NUMERIC, 1)
+ *  - SYSTIMESTAMP - INTERVAL '3' DAY → NOW() - INTERVAL '3 days'
+ *  - NVL(TO_CHAR(TRUNC(...,'MM'),...)) → COALESCE(TO_CHAR(DATE_TRUNC('month',...),...)
+ *  - ROLLUP(TRUNC(...,'MM')) → ROLLUP(DATE_TRUNC('month',...))
  */
 public class RentalDAO {
 
     private static final Logger LOG = Logger.getLogger(RentalDAO.class.getName());
 
     // -----------------------------------------------------------------------
-    // BEGIN RENTAL — calls Oracle package procedure with OUT parameter
-    // Oracle CallableStatement: {call pkg.proc(?,?,?,?)}
+    // BEGIN RENTAL — direct SQL replaces Oracle package procedure call
+    // Step 1: SELECT FOR UPDATE (lock reservation)
+    // Step 2: INSERT INTO rentals RETURNING rental_id
+    // Step 3: UPDATE reservations SET status = 'COMPLETED'
     // -----------------------------------------------------------------------
     public long beginRental(long reservationId, long employeeId, long odometerOut) throws SQLException {
-        // Oracle package procedure call syntax
-        final String call = "{ call car_rental_pkg.begin_rental(?, ?, ?, ?) }";
+        final String lockSql = """
+            SELECT vehicle_id, customer_id, pickup_location, dropoff_location
+              FROM reservations
+             WHERE reservation_id = ? AND status = 'CONFIRMED'
+             FOR UPDATE
+            """;
+        final String insertSql = """
+            INSERT INTO rentals (reservation_id, customer_id, vehicle_id,
+                                 pickup_location, dropoff_location,
+                                 actual_pickup, odometer_out, employee_out, status)
+            VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, 'ACTIVE')
+            RETURNING rental_id
+            """;
+        final String updResSql = "UPDATE reservations SET status='COMPLETED' WHERE reservation_id=?";
+
         Connection conn = DBConnectionPool.getInstance().getConnection();
-        try (CallableStatement cs = conn.prepareCall(call)) {
-            cs.setLong(1, reservationId);
-            cs.setLong(2, employeeId);
-            cs.setLong(3, odometerOut);
-            cs.registerOutParameter(4, Types.NUMERIC);  // OUT p_rental_id
-            cs.execute();
-            long rentalId = cs.getLong(4);
+        try {
+            // Step 1: lock & read reservation
+            long vehicleId, customerId, pickupLoc, dropoffLoc;
+            try (PreparedStatement ps = conn.prepareStatement(lockSql)) {
+                ps.setLong(1, reservationId);
+                ResultSet rs = ps.executeQuery();
+                if (!rs.next()) throw new SQLException("Reservation not found or not in CONFIRMED status");
+                vehicleId  = rs.getLong("vehicle_id");
+                customerId = rs.getLong("customer_id");
+                pickupLoc  = rs.getLong("pickup_location");
+                dropoffLoc = rs.getLong("dropoff_location");
+            }
+            // Step 2: insert rental, get generated ID
+            long rentalId;
+            try (PreparedStatement ps = conn.prepareStatement(insertSql)) {
+                ps.setLong(1, reservationId);
+                ps.setLong(2, customerId);
+                ps.setLong(3, vehicleId);
+                ps.setLong(4, pickupLoc);
+                ps.setLong(5, dropoffLoc);
+                ps.setLong(6, odometerOut);
+                ps.setLong(7, employeeId);
+                ResultSet rs = ps.executeQuery();
+                if (!rs.next()) throw new SQLException("Insert rental failed, no ID returned.");
+                rentalId = rs.getLong(1);
+            }
+            // Step 3: mark reservation completed
+            try (PreparedStatement ps = conn.prepareStatement(updResSql)) {
+                ps.setLong(1, reservationId);
+                ps.executeUpdate();
+            }
             conn.commit();
             LOG.info("Rental started: rentalId=" + rentalId);
             return rentalId;
@@ -51,25 +94,49 @@ public class RentalDAO {
     }
 
     // -----------------------------------------------------------------------
-    // COMPLETE RENTAL — calls Oracle package procedure
+    // COMPLETE RENTAL — direct UPDATE replaces Oracle package procedure call
+    // Clob → plain String (TEXT in PostgreSQL)
     // -----------------------------------------------------------------------
     public void completeRental(long rentalId, long employeeId, long odometerIn,
                                int fuelLevelIn, String damageNotes) throws SQLException {
-        final String call = "{ call car_rental_pkg.complete_rental(?, ?, ?, ?, ?) }";
+        final String sql = """
+            UPDATE rentals r
+               SET status         = 'COMPLETED',
+                   actual_dropoff = NOW(),
+                   odometer_in    = ?,
+                   fuel_level_in  = ?,
+                   base_charge    = (
+                       SELECT COALESCE(v.daily_override, vc.daily_rate)
+                              * GREATEST(1, CEIL(EXTRACT(EPOCH FROM (NOW() - r2.actual_pickup)) / 86400))
+                         FROM rentals r2
+                         JOIN vehicles v ON r2.vehicle_id = v.vehicle_id
+                         JOIN vehicle_categories vc ON v.category_id = vc.category_id
+                        WHERE r2.rental_id = r.rental_id
+                   ),
+                   fuel_charge    = GREATEST(0, (
+                       SELECT (r2.fuel_level_out - ?) * 3
+                         FROM rentals r2
+                        WHERE r2.rental_id = r.rental_id
+                   )),
+                   damage_charge  = CASE WHEN ? IS NOT NULL AND LENGTH(?) > 0 THEN 250 ELSE 0 END,
+                   total_charge   = base_charge + fuel_charge + damage_charge + COALESCE(late_fee, 0),
+                   employee_in    = ?,
+                   damage_notes   = ?,
+                   updated_at     = NOW()
+             WHERE rental_id = ? AND status = 'ACTIVE'
+            """;
         Connection conn = DBConnectionPool.getInstance().getConnection();
-        try (CallableStatement cs = conn.prepareCall(call)) {
-            cs.setLong(1, rentalId);
-            cs.setLong(2, employeeId);
-            cs.setLong(3, odometerIn);
-            cs.setInt(4, fuelLevelIn);
-            if (damageNotes != null && !damageNotes.isBlank()) {
-                Clob clob = conn.createClob();
-                clob.setString(1, damageNotes);
-                cs.setClob(5, clob);
-            } else {
-                cs.setNull(5, Types.CLOB);
-            }
-            cs.execute();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1,   odometerIn);
+            ps.setInt(2,    fuelLevelIn);
+            ps.setInt(3,    fuelLevelIn);       // fuel_charge subquery
+            ps.setString(4, damageNotes);       // damage_charge CASE null check
+            ps.setString(5, damageNotes);       // damage_charge LENGTH check
+            ps.setLong(6,   employeeId);
+            ps.setString(7, damageNotes);       // damage_notes column
+            ps.setLong(8,   rentalId);
+            int rows = ps.executeUpdate();
+            if (rows == 0) throw new SQLException("Active rental not found: " + rentalId);
             conn.commit();
         } catch (SQLException e) {
             conn.rollback();
@@ -80,7 +147,7 @@ public class RentalDAO {
     }
 
     // -----------------------------------------------------------------------
-    // FIND ACTIVE rentals — using Oracle view v_active_rentals
+    // FIND ACTIVE rentals — using view v_active_rentals (unchanged)
     // -----------------------------------------------------------------------
     public List<Rental> findActive() throws SQLException {
         final String sql = """
@@ -103,7 +170,7 @@ public class RentalDAO {
     }
 
     // -----------------------------------------------------------------------
-    // FIND BY ID — uses CTE for clean read
+    // FIND BY ID — CTE (ANSI SQL, unchanged)
     // -----------------------------------------------------------------------
     public Optional<Rental> findById(long rentalId) throws SQLException {
         final String sql = """
@@ -133,7 +200,7 @@ public class RentalDAO {
     }
 
     // -----------------------------------------------------------------------
-    // DASHBOARD QUERY — uses analytic functions
+    // DASHBOARD QUERY — created_at::DATE cast replaces Oracle TRUNC()
     // -----------------------------------------------------------------------
     public List<Object[]> getDashboardStats() throws SQLException {
         final String sql = """
@@ -143,7 +210,7 @@ public class RentalDAO {
                    AVG(total_charge) AS avg_charge,
                    MAX(total_charge) AS max_charge
               FROM rentals
-             WHERE TRUNC(created_at) >= TRUNC(SYSDATE) - 30
+             WHERE created_at::DATE >= CURRENT_DATE - INTERVAL '30 days'
              GROUP BY status
              ORDER BY status
             """;
@@ -167,7 +234,7 @@ public class RentalDAO {
     }
 
     // -----------------------------------------------------------------------
-    // OVERDUE RENTALS — using EXTRACT and INTERVAL arithmetic
+    // OVERDUE RENTALS — PostgreSQL-compatible timestamp arithmetic
     // -----------------------------------------------------------------------
     public List<Rental> findOverdue() throws SQLException {
         final String sql = """
@@ -184,14 +251,14 @@ public class RentalDAO {
                    r.fuel_level_out, NULL AS fuel_level_in,
                    r.base_charge, r.fuel_charge, r.damage_charge, r.late_fee, r.total_charge,
                    r.status, r.employee_out, r.employee_in,
-                   ROUND((SYSTIMESTAMP - r.actual_pickup) * 24, 1) AS hours_overdue
+                   ROUND(EXTRACT(EPOCH FROM (NOW() - r.actual_pickup)) / 3600::NUMERIC, 1) AS hours_overdue
               FROM rentals r
               JOIN customers c  ON r.customer_id    = c.customer_id
               JOIN vehicles  v  ON r.vehicle_id      = v.vehicle_id
               JOIN locations l1 ON r.pickup_location = l1.location_id
               JOIN locations l2 ON r.dropoff_location= l2.location_id
              WHERE r.status = 'ACTIVE'
-               AND r.actual_pickup < SYSTIMESTAMP - INTERVAL '3' DAY
+               AND r.actual_pickup < NOW() - INTERVAL '3 days'
              ORDER BY r.actual_pickup ASC
             """;
         Connection conn = DBConnectionPool.getInstance().getConnection();
@@ -204,11 +271,11 @@ public class RentalDAO {
     }
 
     // -----------------------------------------------------------------------
-    // REVENUE REPORT — uses materialized view + ROLLUP
+    // REVENUE REPORT — DATE_TRUNC replaces Oracle TRUNC(...,'MM')
     // -----------------------------------------------------------------------
     public List<Object[]> getRevenueReport(LocalDate from, LocalDate to) throws SQLException {
         final String sql = """
-            SELECT NVL(TO_CHAR(TRUNC(actual_dropoff,'MM'),'YYYY-MM'), 'TOTAL') AS period,
+            SELECT COALESCE(TO_CHAR(DATE_TRUNC('month', actual_dropoff), 'YYYY-MM'), 'TOTAL') AS period,
                    COUNT(*)                        AS rental_count,
                    ROUND(SUM(total_charge),2)      AS total_revenue,
                    ROUND(AVG(total_charge),2)      AS avg_revenue,
@@ -218,9 +285,9 @@ public class RentalDAO {
                    ROUND(SUM(late_fee),2)           AS late_fees
               FROM rentals
              WHERE status = 'COMPLETED'
-               AND TRUNC(actual_dropoff) BETWEEN ? AND ?
-             GROUP BY ROLLUP(TRUNC(actual_dropoff,'MM'))
-             ORDER BY TRUNC(actual_dropoff,'MM') NULLS LAST
+               AND actual_dropoff::DATE BETWEEN ? AND ?
+             GROUP BY ROLLUP(DATE_TRUNC('month', actual_dropoff))
+             ORDER BY DATE_TRUNC('month', actual_dropoff) NULLS LAST
             """;
         List<Object[]> rows = new ArrayList<>();
         Connection conn = DBConnectionPool.getInstance().getConnection();
